@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>METEOR DODGE</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700;900&display=swap');
+  :root {
+    --bg: #03050f; --glow: #00f5ff; --danger: #ff3a3a;
+    --score: #ffe94d; --ship: #7bffc8;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 100vh; font-family: 'Share Tech Mono', monospace;
+    overflow: hidden; user-select: none;
+  }
+  #title {
+    font-family: 'Orbitron', sans-serif; font-weight: 900;
+    font-size: 1.8rem; color: var(--glow); letter-spacing: 0.3em;
+    text-shadow: 0 0 20px var(--glow), 0 0 40px var(--glow);
+    margin-bottom: 6px;
+  }
+  #hud { display: flex; gap: 32px; margin-bottom: 8px; align-items: flex-end; }
+  .hud-item { text-align: center; }
+  .hud-label { font-size: 0.55rem; letter-spacing: 0.2em; color: #4a6080; }
+  .hud-value { font-size: 1.3rem; color: var(--score); text-shadow: 0 0 10px var(--score); }
+
+  /* Progress bar */
+  #prog-wrap {
+    width: 420px; margin-bottom: 6px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  #prog-label { font-size: 0.6rem; color: #4a6080; white-space: nowrap; }
+  #prog-bar-bg {
+    flex: 1; height: 8px; background: #0d2030;
+    border: 1px solid #0d3a4a; border-radius: 4px; overflow: hidden;
+  }
+  #prog-bar {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, #00f5ff, #7bffc8);
+    box-shadow: 0 0 8px #00f5ff;
+    transition: width 0.1s;
+    border-radius: 4px;
+  }
+  #prog-next { font-size: 0.6rem; color: #4a6080; white-space: nowrap; }
+
+  #canvas-wrap {
+    position: relative;
+    border: 1px solid #0d2a3a;
+    box-shadow: 0 0 40px rgba(0,245,255,0.08);
+  }
+  canvas { display: block; }
+
+  #overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(3,5,15,0.9);
+    backdrop-filter: blur(3px);
+  }
+  #overlay h2 {
+    font-family: 'Orbitron', sans-serif; font-size: 1.5rem; margin-bottom: 10px;
+  }
+  #overlay.start h2 { color: var(--glow); text-shadow: 0 0 20px var(--glow); }
+  #overlay.dead  h2 { color: var(--danger); text-shadow: 0 0 20px var(--danger); }
+  #overlay.levelup h2 { color: #ffe94d; text-shadow: 0 0 20px #ffe94d; }
+  #overlay p { font-size: 0.78rem; color: #7090a0; margin-bottom: 5px; letter-spacing: 0.1em; }
+  #final-score { font-size: 2rem; color: var(--score); text-shadow: 0 0 15px var(--score); margin: 10px 0 16px; }
+  #btn {
+    font-family: 'Orbitron', sans-serif; font-size: 0.8rem;
+    letter-spacing: 0.2em; padding: 11px 32px;
+    background: transparent; border: 2px solid var(--glow);
+    color: var(--glow); cursor: pointer;
+    text-shadow: 0 0 8px var(--glow);
+    box-shadow: 0 0 20px rgba(0,245,255,0.2);
+    transition: all 0.2s;
+  }
+  #btn:hover { background: rgba(0,245,255,0.1); box-shadow: 0 0 30px rgba(0,245,255,0.4); }
+  #controls { margin-top: 12px; font-size: 0.62rem; color: #2a4050; letter-spacing: 0.12em; }
+  #level-badge {
+    font-family: 'Orbitron', sans-serif; font-size: 0.65rem;
+    color: #ffe94d; letter-spacing: 0.15em; margin-bottom: 14px;
+  }
+</style>
+</head>
+<body>
+
+<div id="title">METEOR DODGE</div>
+
+<div id="hud">
+  <div class="hud-item"><div class="hud-label">ОЧКИ</div><div class="hud-value" id="score-display">0</div></div>
+  <div class="hud-item"><div class="hud-label">РЕКОРД</div><div class="hud-value" id="best-display">0</div></div>
+  <div class="hud-item"><div class="hud-label">УРОВЕНЬ</div><div class="hud-value" id="level-display">1</div></div>
+</div>
+
+<div id="prog-wrap">
+  <span id="prog-label">ДО УР.2</span>
+  <div id="prog-bar-bg"><div id="prog-bar"></div></div>
+  <span id="prog-next" id="prog-next">0 / 500</span>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="c" width="420" height="460"></canvas>
+
+  <div id="overlay" class="start">
+    <h2>ГОТОВ?</h2>
+    <p>Уклоняйся от метеоритов</p>
+    <p>Набери расстояние — перейди на уровень</p>
+    <div id="final-score" style="display:none"></div>
+    <div id="level-badge" style="display:none"></div>
+    <button id="btn" onclick="startGame()">СТАРТ</button>
+    <div id="controls">← → СТРЕЛКИ  или  A D  или  касание</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// ── Уровни: dist = сколько км нужно пройти для перехода ──────────
+const LEVELS = [
+  { dist: 500,  speed: 1.4, spawnInterval: 130, maxMeteors: 1, meteorSize: [8,14]  },
+  { dist: 800,  speed: 1.8, spawnInterval: 110, maxMeteors: 1, meteorSize: [9,15]  },
+  { dist: 1100, speed: 2.2, spawnInterval: 95,  maxMeteors: 2, meteorSize: [9,15]  },
+  { dist: 1500, speed: 2.7, spawnInterval: 80,  maxMeteors: 2, meteorSize: [10,16] },
+  { dist: 2000, speed: 3.2, spawnInterval: 65,  maxMeteors: 2, meteorSize: [10,17] },
+  { dist: 9999, speed: 3.8, spawnInterval: 55,  maxMeteors: 3, meteorSize: [8,18]  },
+];
+
+const stars = Array.from({length: 80}, () => ({
+  x: Math.random()*W, y: Math.random()*H,
+  r: Math.random()*1.2+0.2,
+  speed: Math.random()*0.5+0.15,
+  a: Math.random()*0.7+0.2
+}));
+
+let ship, meteors, score, best, level, dist, lastSpawn, frame;
+let running = false, levelingUp = false, keys = {};
+let animId;
+
+// расстояние накопленное на предыдущих уровнях
+let distOffset = 0;
+
+function levelDef(l) { return LEVELS[Math.min(l-1, LEVELS.length-1)]; }
+
+function initGame() {
+  ship = { x: W/2, y: H-58, w:26, h:30, vx:0 };
+  meteors = []; score = 0; dist = 0; distOffset = 0; level = 1;
+  lastSpawn = 0; frame = 0;
+  best = parseInt(localStorage.getItem('mdbest')||'0');
+  document.getElementById('best-display').textContent = best;
+  updateHUD();
+}
+
+function startGame() {
+  document.getElementById('overlay').style.display = 'none';
+  initGame(); running = true;
+  cancelAnimationFrame(animId);
+  loop();
+}
+
+function updateHUD() {
+  document.getElementById('score-display').textContent = score;
+  document.getElementById('level-display').textContent = level;
+  const ld = levelDef(level);
+  const needed = ld.dist;
+  const levelDist = dist - distOffset;        // расстояние на текущем уровне
+  const pct = Math.min(100, levelDist / needed * 100);
+  document.getElementById('prog-bar').style.width = pct + '%';
+  const nextLvl = level + 1;
+  document.getElementById('prog-label').textContent =
+    level < LEVELS.length ? `ДО УР.${nextLvl}` : 'МАКС';
+  document.getElementById('prog-next').textContent =
+    `${Math.floor(levelDist)} / ${needed}`;
+}
+
+function gameOver() {
+  running = false;
+  if (score > best) { best = score; localStorage.setItem('mdbest', best); }
+  document.getElementById('best-display').textContent = best;
+
+  const ov = document.getElementById('overlay');
+  ov.className = 'dead';
+  ov.style.display = 'flex';
+  ov.querySelector('h2').textContent = '💥 УНИЧТОЖЕН';
+  ov.querySelector('p').textContent  = 'Финальный счёт';
+  const fs = document.getElementById('final-score');
+  fs.style.display = 'block'; fs.textContent = score;
+  const lb = document.getElementById('level-badge');
+  lb.style.display = 'block'; lb.textContent = `УРОВЕНЬ ${level}  •  ДИСТАНЦИЯ ${Math.floor(dist)} КМ`;
+  document.getElementById('btn').textContent = 'ЕЩЁ РАЗ';
+  flashCanvas('#ff3a3a');
+}
+
+function showLevelUp() {
+  levelingUp = true; running = false;
+  const ov = document.getElementById('overlay');
+  ov.className = 'levelup';
+  ov.style.display = 'flex';
+  ov.querySelector('h2').textContent = `🚀 УРОВЕНЬ ${level}!`;
+  ov.querySelector('p').textContent  = 'Сектор пройден. Дальше опаснее!';
+  document.getElementById('final-score').style.display = 'none';
+  document.getElementById('level-badge').style.display = 'none';
+  document.getElementById('btn').textContent = 'ПРОДОЛЖИТЬ';
+  document.getElementById('btn').onclick = resumeGame;
+  flashCanvas('#ffe94d');
+}
+
+function resumeGame() {
+  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('btn').onclick = startGame;
+  meteors = []; lastSpawn = frame;
+  running = true; levelingUp = false;
+  loop();
+}
+
+function flashCanvas(color) {
+  let t = 0;
+  const rgb = color === '#ff3a3a' ? '255,58,58' : '255,233,77';
+  const fl = () => {
+    ctx.fillStyle = `rgba(${rgb},${0.45 - t*0.045})`;
+    ctx.fillRect(0,0,W,H);
+    if (++t < 10) requestAnimationFrame(fl);
+  };
+  fl();
+}
+
+// ── Main loop ─────────────────────────────────────────────────────
+function loop() {
+  if (!running) return;
+  animId = requestAnimationFrame(loop);
+  frame++;
+
+  const ld = levelDef(level);
+
+  // Дистанция (пропорционально скорости)
+  dist += ld.speed * 0.08;
+  score = Math.floor(dist);
+
+  // Проверка перехода на уровень
+  const levelDist = dist - distOffset;
+  if (levelDist >= ld.dist && level < LEVELS.length) {
+    distOffset = dist;
+    level++;
+    document.getElementById('level-display').textContent = level;
+    cancelAnimationFrame(animId);
+    showLevelUp();
+    return;
+  }
+
+  updateHUD();
+
+  // Управление
+  const accel = 0.5, maxV = 5.2, friction = 0.80;
+  if (keys['ArrowLeft']||keys['a'])  ship.vx -= accel;
+  if (keys['ArrowRight']||keys['d']) ship.vx += accel;
+  ship.vx *= friction;
+  ship.vx = Math.max(-maxV, Math.min(maxV, ship.vx));
+  ship.x += ship.vx;
+  ship.x = Math.max(ship.w/2, Math.min(W-ship.w/2, ship.x));
+
+  // Спавн
+  if (frame - lastSpawn > ld.spawnInterval) {
+    lastSpawn = frame;
+    const cnt = (level >= 3 && Math.random() < 0.4) ? 2 : 1;
+    for (let i = 0; i < cnt; i++) {
+      const [rMin, rMax] = ld.meteorSize;
+      meteors.push({
+        x: Math.random()*(W-50)+25,
+        y: -22,
+        r: Math.random()*(rMax-rMin)+rMin,
+        vx: (Math.random()-0.5)*1.4,
+        vy: ld.speed * (0.75 + Math.random()*0.45),
+        rot: 0, rotV: (Math.random()-0.5)*0.07
+      });
+    }
+  }
+
+  meteors = meteors.filter(m => m.y < H+35);
+  meteors.forEach(m => { m.x += m.vx; m.y += m.vy; m.rot += m.rotV; });
+
+  // ── Draw ─────────────────────────────────────────────────────
+  ctx.fillStyle = '#03050f'; ctx.fillRect(0,0,W,H);
+
+  // Stars (скорость пропорциональна уровню)
+  const starMult = 1 + (level-1)*0.3;
+  stars.forEach(s => {
+    s.y += s.speed * starMult;
+    if (s.y > H) { s.y = 0; s.x = Math.random()*W; }
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+    ctx.fillStyle = `rgba(255,255,255,${s.a})`; ctx.fill();
+  });
+
+  // Метеориты
+  meteors.forEach(m => {
+    ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.rot);
+    const grd = ctx.createRadialGradient(0,0,0, 0,0,m.r*1.9);
+    grd.addColorStop(0,'rgba(255,120,50,0.3)');
+    grd.addColorStop(1,'rgba(255,60,0,0)');
+    ctx.beginPath(); ctx.arc(0,0,m.r*1.9,0,Math.PI*2);
+    ctx.fillStyle = grd; ctx.fill();
+
+    ctx.beginPath();
+    for (let i=0;i<7;i++){
+      const a=(Math.PI*2/7)*i;
+      const j=m.r*(0.75+((i*137)%100)/400);
+      i===0?ctx.moveTo(Math.cos(a)*j,Math.sin(a)*j):ctx.lineTo(Math.cos(a)*j,Math.sin(a)*j);
+    }
+    ctx.closePath();
+    ctx.fillStyle='#c44010'; ctx.fill();
+    ctx.strokeStyle='#ff7040'; ctx.lineWidth=1.2; ctx.stroke();
+    ctx.restore();
+
+    // Коллизия
+    const dx=m.x-ship.x, dy=m.y-(ship.y-ship.h/2+6);
+    if(Math.sqrt(dx*dx+dy*dy) < m.r+10){ running=false; cancelAnimationFrame(animId); gameOver(); }
+  });
+
+  drawShip(ship.x, ship.y);
+}
+
+function drawShip(x, y) {
+  ctx.save(); ctx.translate(x,y);
+  const eg = ctx.createRadialGradient(0,14,0,0,14,18);
+  eg.addColorStop(0,'rgba(0,200,255,0.5)'); eg.addColorStop(1,'rgba(0,100,255,0)');
+  ctx.beginPath(); ctx.arc(0,16,18,0,Math.PI*2); ctx.fillStyle=eg; ctx.fill();
+
+  const flicker = 0.7 + Math.sin(frame*0.4)*0.3;
+  ctx.beginPath(); ctx.moveTo(-6,10); ctx.lineTo(0,10+16*flicker); ctx.lineTo(6,10);
+  ctx.closePath(); ctx.fillStyle='rgba(0,220,255,0.65)'; ctx.fill();
+
+  ctx.beginPath(); ctx.moveTo(0,-15); ctx.lineTo(12,12); ctx.lineTo(6,10);
+  ctx.lineTo(0,13); ctx.lineTo(-6,10); ctx.lineTo(-12,12); ctx.closePath();
+  ctx.fillStyle='#1a3a4a'; ctx.fill();
+  ctx.strokeStyle='#7bffc8'; ctx.lineWidth=1.5;
+  ctx.shadowColor='#7bffc8'; ctx.shadowBlur=8; ctx.stroke();
+
+  ctx.beginPath(); ctx.ellipse(0,-4,3.5,5.5,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,245,255,0.5)'; ctx.fill();
+  ctx.restore();
+}
+
+// ── Controls ──────────────────────────────────────────────────────
+document.addEventListener('keydown', e=>{ keys[e.key]=true; });
+document.addEventListener('keyup',   e=>{ keys[e.key]=false; });
+
+let touchStartX=null;
+canvas.addEventListener('touchstart', e=>{ touchStartX=e.touches[0].clientX; });
+canvas.addEventListener('touchmove', e=>{
+  if(!touchStartX) return;
+  const dx=e.touches[0].clientX-touchStartX;
+  ship.x=Math.max(ship.w/2,Math.min(W-ship.w/2, ship.x+dx*0.65));
+  touchStartX=e.touches[0].clientX; e.preventDefault();
+},{passive:false});
+
+// Idle анимация
+initGame();
+(function idleLoop(){
+  if(running) return;
+  requestAnimationFrame(idleLoop);
+  ctx.fillStyle='#03050f'; ctx.fillRect(0,0,W,H);
+  stars.forEach(s=>{
+    s.y+=s.speed; if(s.y>H){s.y=0;s.x=Math.random()*W;}
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+    ctx.fillStyle=`rgba(255,255,255,${s.a})`; ctx.fill();
+  });
+  drawShip(W/2,H-58);
+})();
+</script>
+</body>
+</html>
