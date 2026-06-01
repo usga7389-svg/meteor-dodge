@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>METEOR DODGE</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@700;900&display=swap');
+  :root { --bg:#03050f; --glow:#00f5ff; --danger:#ff3a3a; --score:#ffe94d; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:var(--bg); display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    height:100vh; font-family:'Share Tech Mono',monospace;
+    overflow:hidden; user-select:none;
+  }
+  #title {
+    font-family:'Orbitron',sans-serif; font-weight:900;
+    font-size:1.8rem; color:var(--glow); letter-spacing:0.3em;
+    text-shadow:0 0 20px var(--glow),0 0 40px var(--glow); margin-bottom:6px;
+  }
+  #hud { display:flex; gap:28px; margin-bottom:6px; align-items:flex-end; }
+  .hud-item { text-align:center; }
+  .hud-label { font-size:0.52rem; letter-spacing:0.2em; color:#4a6080; }
+  .hud-value { font-size:1.2rem; color:var(--score); text-shadow:0 0 10px var(--score); }
+  #prog-wrap { width:420px; margin-bottom:5px; display:flex; align-items:center; gap:8px; }
+  #prog-label { font-size:0.58rem; color:#4a6080; white-space:nowrap; }
+  #prog-bar-bg { flex:1; height:7px; background:#0d2030; border:1px solid #0d3a4a; border-radius:4px; overflow:hidden; }
+  #prog-bar { height:100%; width:0%; background:linear-gradient(90deg,#00f5ff,#7bffc8); box-shadow:0 0 8px #00f5ff; border-radius:4px; }
+  #prog-next { font-size:0.58rem; color:#4a6080; white-space:nowrap; }
+  #canvas-wrap { position:relative; border:1px solid #0d2a3a; box-shadow:0 0 40px rgba(0,245,255,0.08); }
+  canvas { display:block; }
+  #overlay {
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    background:rgba(3,5,15,0.9); backdrop-filter:blur(3px);
+  }
+  #overlay h2 { font-family:'Orbitron',sans-serif; font-size:1.4rem; margin-bottom:8px; }
+  #overlay.start h2 { color:var(--glow); text-shadow:0 0 20px var(--glow); }
+  #overlay.dead  h2 { color:var(--danger); text-shadow:0 0 20px var(--danger); }
+  #overlay.levelup h2 { color:#ffe94d; text-shadow:0 0 20px #ffe94d; }
+  #overlay p { font-size:0.75rem; color:#7090a0; margin-bottom:4px; letter-spacing:0.1em; }
+  #final-score { font-size:1.9rem; color:var(--score); text-shadow:0 0 15px var(--score); margin:8px 0 14px; }
+  #btn {
+    font-family:'Orbitron',sans-serif; font-size:0.78rem; letter-spacing:0.2em;
+    padding:10px 30px; background:transparent; border:2px solid var(--glow);
+    color:var(--glow); cursor:pointer; text-shadow:0 0 8px var(--glow);
+    box-shadow:0 0 20px rgba(0,245,255,0.2); transition:all 0.2s;
+  }
+  #btn:hover { background:rgba(0,245,255,0.1); box-shadow:0 0 30px rgba(0,245,255,0.4); }
+  #controls { margin-top:10px; font-size:0.6rem; color:#2a4050; letter-spacing:0.12em; }
+  #level-badge { font-family:'Orbitron',sans-serif; font-size:0.62rem; color:#ffe94d; letter-spacing:0.15em; margin-bottom:12px; }
+  #enemy-warn { font-size:0.7rem; color:#ff4dff; text-shadow:0 0 10px #ff4dff; margin-bottom:4px; display:none; }
+</style>
+</head>
+<body>
+<div id="title">METEOR DODGE</div>
+<div id="hud">
+  <div class="hud-item"><div class="hud-label">ОЧКИ</div><div class="hud-value" id="score-display">0</div></div>
+  <div class="hud-item"><div class="hud-label">РЕКОРД</div><div class="hud-value" id="best-display">0</div></div>
+  <div class="hud-item"><div class="hud-label">УРОВЕНЬ</div><div class="hud-value" id="level-display">1</div></div>
+</div>
+<div id="prog-wrap">
+  <span id="prog-label">ДО УР.2</span>
+  <div id="prog-bar-bg"><div id="prog-bar"></div></div>
+  <span id="prog-next">0 / 300</span>
+</div>
+<div id="canvas-wrap">
+  <canvas id="c" width="420" height="460"></canvas>
+  <div id="overlay" class="start">
+    <h2>ГОТОВ?</h2>
+    <p>Уклоняйся от метеоритов</p>
+    <p>С уровня 4 — инопланетяне с лазерами!</p>
+    <div id="final-score" style="display:none"></div>
+    <div id="level-badge" style="display:none"></div>
+    <div id="enemy-warn">👾 ВНИМАНИЕ: ИНОПЛАНЕТЯНЕ!</div>
+    <button id="btn" onclick="startGame()">СТАРТ</button>
+    <div id="controls">← → СТРЕЛКИ  или  A D  или  касание</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// ── 12 уровней ───────────────────────────────────────────────────
+// dist: км до следующего уровня (короче чем раньше!)
+// aliens: появляются с уровня 4
+// alienLasers: лазеры становятся опаснее
+const LEVELS = [
+  { dist:300, speed:1.6, spawnI:120, meteorSize:[8,13], aliens:0, laserSpeed:0    }, // 1
+  { dist:350, speed:1.9, spawnI:108, meteorSize:[8,14], aliens:0, laserSpeed:0    }, // 2
+  { dist:400, speed:2.2, spawnI:96,  meteorSize:[9,14], aliens:0, laserSpeed:0    }, // 3
+  { dist:350, speed:2.4, spawnI:90,  meteorSize:[9,14], aliens:1, laserSpeed:3.5  }, // 4 — появляются пришельцы
+  { dist:350, speed:2.6, spawnI:84,  meteorSize:[9,15], aliens:1, laserSpeed:4.0  }, // 5
+  { dist:400, speed:2.9, spawnI:76,  meteorSize:[9,15], aliens:2, laserSpeed:4.5  }, // 6
+  { dist:380, speed:3.0, spawnI:72,  meteorSize:[9,15], aliens:2, laserSpeed:4.5  }, // 7 — чуть легче 6
+  { dist:380, speed:3.1, spawnI:70,  meteorSize:[9,15], aliens:2, laserSpeed:4.8  }, // 8
+  { dist:400, speed:3.3, spawnI:65,  meteorSize:[10,16],aliens:2, laserSpeed:5.0  }, // 9
+  { dist:400, speed:3.5, spawnI:60,  meteorSize:[10,16],aliens:3, laserSpeed:5.2  }, // 10
+  { dist:450, speed:3.7, spawnI:55,  meteorSize:[10,17],aliens:3, laserSpeed:5.5  }, // 11
+  { dist:9999,speed:4.0, spawnI:50,  meteorSize:[10,17],aliens:3, laserSpeed:5.8  }, // 12
+];
+
+const stars = Array.from({length:80},()=>({
+  x:Math.random()*W, y:Math.random()*H,
+  r:Math.random()*1.2+0.2, speed:Math.random()*0.5+0.15, a:Math.random()*0.7+0.2
+}));
+
+let ship, meteors, aliens, lasers, score, best, level, dist, distOffset, lastSpawn, lastAlienSpawn, frame;
+let running=false, levelingUp=false, keys={}, animId;
+
+function ld(l){ return LEVELS[Math.min(l-1,LEVELS.length-1)]; }
+
+function initGame(){
+  ship={x:W/2,y:H-58,w:26,h:30,vx:0};
+  meteors=[]; aliens=[]; lasers=[];
+  score=0; dist=0; distOffset=0; level=1;
+  lastSpawn=0; lastAlienSpawn=0; frame=0;
+  best=parseInt(localStorage.getItem('mdbest')||'0');
+  document.getElementById('best-display').textContent=best;
+  updateHUD();
+}
+
+function startGame(){
+  document.getElementById('overlay').style.display='none';
+  initGame(); running=true;
+  cancelAnimationFrame(animId); loop();
+}
+
+function updateHUD(){
+  document.getElementById('score-display').textContent=score;
+  document.getElementById('level-display').textContent=level;
+  const l=ld(level), needed=l.dist, levelDist=dist-distOffset;
+  const pct=Math.min(100,levelDist/needed*100);
+  document.getElementById('prog-bar').style.width=pct+'%';
+  document.getElementById('prog-label').textContent=level<LEVELS.length?`ДО УР.${level+1}`:'МАКС';
+  document.getElementById('prog-next').textContent=`${Math.floor(levelDist)} / ${needed}`;
+}
+
+function gameOver(){
+  running=false;
+  if(score>best){best=score;localStorage.setItem('mdbest',best);}
+  document.getElementById('best-display').textContent=best;
+  const ov=document.getElementById('overlay');
+  ov.className='dead'; ov.style.display='flex';
+  ov.querySelector('h2').textContent='💥 УНИЧТОЖЕН';
+  ov.querySelector('p').textContent='Финальный счёт';
+  const fs=document.getElementById('final-score');
+  fs.style.display='block'; fs.textContent=score;
+  const lb=document.getElementById('level-badge');
+  lb.style.display='block'; lb.textContent=`УР.${level}  •  ${Math.floor(dist)} КМ`;
+  document.getElementById('enemy-warn').style.display='none';
+  document.getElementById('btn').textContent='ЕЩЁ РАЗ';
+  document.getElementById('btn').onclick=startGame;
+  flashCanvas('#ff3a3a');
+}
+
+function showLevelUp(){
+  levelingUp=true; running=false;
+  const ov=document.getElementById('overlay');
+  ov.className='levelup'; ov.style.display='flex';
+  ov.querySelector('h2').textContent=`🚀 УРОВЕНЬ ${level}!`;
+  const hasAliens=ld(level).aliens>0;
+  ov.querySelector('p').textContent=hasAliens?'Пришельцы усилили атаку!':'Сектор пройден. Дальше опаснее!';
+  document.getElementById('final-score').style.display='none';
+  document.getElementById('level-badge').style.display='none';
+  // показываем предупреждение если только появились пришельцы
+  const warn=document.getElementById('enemy-warn');
+  warn.style.display=(level===4)?'block':'none';
+  document.getElementById('btn').textContent='ПРОДОЛЖИТЬ';
+  document.getElementById('btn').onclick=resumeGame;
+  flashCanvas('#ffe94d');
+}
+
+function resumeGame(){
+  document.getElementById('overlay').style.display='none';
+  document.getElementById('enemy-warn').style.display='none';
+  document.getElementById('btn').onclick=startGame;
+  meteors=[]; aliens=[]; lasers=[]; lastSpawn=frame; lastAlienSpawn=frame;
+  running=true; levelingUp=false; loop();
+}
+
+function flashCanvas(color){
+  let t=0;
+  const rgb=color==='#ff3a3a'?'255,58,58':color==='#ffe94d'?'255,233,77':'255,77,255';
+  const fl=()=>{ ctx.fillStyle=`rgba(${rgb},${0.45-t*0.045})`; ctx.fillRect(0,0,W,H); if(++t<10)requestAnimationFrame(fl); };
+  fl();
+}
+
+// ── Main loop ─────────────────────────────────────────────────────
+function loop(){
+  if(!running)return;
+  animId=requestAnimationFrame(loop);
+  frame++;
+  const l=ld(level);
+
+  dist+=l.speed*0.08;
+  score=Math.floor(dist);
+
+  // Переход на уровень
+  if(dist-distOffset>=l.dist && level<LEVELS.length){
+    distOffset=dist; level++;
+    document.getElementById('level-display').textContent=level;
+    cancelAnimationFrame(animId); showLevelUp(); return;
+  }
+
+  updateHUD();
+
+  // Управление
+  const accel=0.5,maxV=5.2,friction=0.80;
+  if(keys['ArrowLeft']||keys['a'])  ship.vx-=accel;
+  if(keys['ArrowRight']||keys['d']) ship.vx+=accel;
+  ship.vx*=friction;
+  ship.vx=Math.max(-maxV,Math.min(maxV,ship.vx));
+  ship.x+=ship.vx;
+  ship.x=Math.max(ship.w/2,Math.min(W-ship.w/2,ship.x));
+
+  // Спавн метеоритов
+  if(frame-lastSpawn>l.spawnI){
+    lastSpawn=frame;
+    const cnt=(level>=5&&Math.random()<0.35)?2:1;
+    for(let i=0;i<cnt;i++){
+      const[rMin,rMax]=l.meteorSize;
+      meteors.push({
+        x:Math.random()*(W-50)+25, y:-22,
+        r:Math.random()*(rMax-rMin)+rMin,
+        vx:(Math.random()-0.5)*1.3,
+        vy:l.speed*(0.75+Math.random()*0.4),
+        rot:0, rotV:(Math.random()-0.5)*0.07
+      });
+    }
+  }
+
+  // Спавн инопланетян (с уровня 4)
+  if(l.aliens>0 && frame-lastAlienSpawn>200){
+    lastAlienSpawn=frame;
+    // добавляем нового пришельца если их меньше нормы
+    if(aliens.length<l.aliens){
+      aliens.push({
+        x:Math.random()*(W-80)+40, y:30+Math.random()*60,
+        vx:(Math.random()<0.5?1:-1)*(0.8+Math.random()*0.5),
+        w:36, h:20,
+        shootTimer:Math.floor(Math.random()*80+60),
+        frame:0
+      });
+    }
+  }
+
+  // Обновление пришельцев
+  aliens.forEach(a=>{
+    a.x+=a.vx; a.frame++;
+    if(a.x<30||a.x>W-30) a.vx*=-1;
+    // стрельба
+    a.shootTimer--;
+    if(a.shootTimer<=0){
+      a.shootTimer=Math.floor(90+Math.random()*60);
+      // стрелять в сторону корабля
+      const dx=ship.x-a.x, dy=ship.y-a.y;
+      const dist2=Math.sqrt(dx*dx+dy*dy)||1;
+      lasers.push({
+        x:a.x, y:a.y+10,
+        vx:(dx/dist2)*l.laserSpeed*0.4,
+        vy:(dy/dist2)*l.laserSpeed,
+        life:120
+      });
+    }
+  });
+
+  // Обновление лазеров
+  lasers=lasers.filter(lr=>lr.life>0);
+  lasers.forEach(lr=>{ lr.x+=lr.vx; lr.y+=lr.vy; lr.life--; });
+
+  meteors=meteors.filter(m=>m.y<H+35);
+  meteors.forEach(m=>{ m.x+=m.vx; m.y+=m.vy; m.rot+=m.rotV; });
+
+  // ── Draw ──────────────────────────────────────────────────────
+  ctx.fillStyle='#03050f'; ctx.fillRect(0,0,W,H);
+
+  const starMult=1+(level-1)*0.25;
+  stars.forEach(s=>{
+    s.y+=s.speed*starMult; if(s.y>H){s.y=0;s.x=Math.random()*W;}
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+    ctx.fillStyle=`rgba(255,255,255,${s.a})`; ctx.fill();
+  });
+
+  // Метеориты
+  meteors.forEach(m=>{
+    ctx.save(); ctx.translate(m.x,m.y); ctx.rotate(m.rot);
+    const grd=ctx.createRadialGradient(0,0,0,0,0,m.r*1.9);
+    grd.addColorStop(0,'rgba(255,120,50,0.3)'); grd.addColorStop(1,'rgba(255,60,0,0)');
+    ctx.beginPath(); ctx.arc(0,0,m.r*1.9,0,Math.PI*2); ctx.fillStyle=grd; ctx.fill();
+    ctx.beginPath();
+    for(let i=0;i<7;i++){
+      const a=(Math.PI*2/7)*i, j=m.r*(0.75+((i*137)%100)/400);
+      i===0?ctx.moveTo(Math.cos(a)*j,Math.sin(a)*j):ctx.lineTo(Math.cos(a)*j,Math.sin(a)*j);
+    }
+    ctx.closePath(); ctx.fillStyle='#c44010'; ctx.fill();
+    ctx.strokeStyle='#ff7040'; ctx.lineWidth=1.2; ctx.stroke(); ctx.restore();
+    const dx=m.x-ship.x, dy=m.y-(ship.y-ship.h/2+6);
+    if(Math.sqrt(dx*dx+dy*dy)<m.r+10){running=false;cancelAnimationFrame(animId);gameOver();}
+  });
+
+  // Инопланетяне
+  aliens.forEach(a=>{
+    ctx.save(); ctx.translate(a.x,a.y);
+    // корпус тарелки
+    const ag=ctx.createRadialGradient(0,0,0,0,0,a.w*0.7);
+    ag.addColorStop(0,'rgba(180,0,255,0.4)'); ag.addColorStop(1,'rgba(100,0,200,0)');
+    ctx.beginPath(); ctx.ellipse(0,0,a.w*0.9,a.h*0.6,0,0,Math.PI*2);
+    ctx.fillStyle=ag; ctx.fill();
+
+    ctx.beginPath(); ctx.ellipse(0,4,a.w,a.h*0.55,0,0,Math.PI*2);
+    ctx.fillStyle='#1a0030'; ctx.fill();
+    ctx.strokeStyle='#cc44ff'; ctx.lineWidth=1.5;
+    ctx.shadowColor='#cc44ff'; ctx.shadowBlur=8; ctx.stroke();
+
+    // купол
+    ctx.beginPath(); ctx.ellipse(0,-2,a.w*0.45,a.h*0.7,0,Math.PI,Math.PI*2);
+    ctx.fillStyle='rgba(180,80,255,0.35)'; ctx.fill();
+    ctx.strokeStyle='#dd88ff'; ctx.lineWidth=1; ctx.stroke();
+
+    // огни (мигают)
+    [-14,-7,0,7,14].forEach((ox,i)=>{
+      const on=(frame+i*8)%20<10;
+      ctx.beginPath(); ctx.arc(ox,5,2.5,0,Math.PI*2);
+      ctx.fillStyle=on?'#ff44ff':'#440044'; ctx.fill();
+    });
+    ctx.restore();
+
+    // Коллизия с кораблём
+    const dx=a.x-ship.x, dy=a.y-ship.y;
+    if(Math.abs(dx)<a.w&&Math.abs(dy)<a.h){running=false;cancelAnimationFrame(animId);gameOver();}
+  });
+
+  // Лазеры
+  lasers.forEach(lr=>{
+    ctx.save();
+    const alpha=Math.min(1,lr.life/20);
+    ctx.shadowColor='#ff44ff'; ctx.shadowBlur=10;
+    ctx.strokeStyle=`rgba(255,80,255,${alpha})`;
+    ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.moveTo(lr.x,lr.y-6); ctx.lineTo(lr.x,lr.y+6);
+    ctx.stroke();
+    // гло точка
+    ctx.beginPath(); ctx.arc(lr.x,lr.y,3,0,Math.PI*2);
+    ctx.fillStyle=`rgba(255,150,255,${alpha})`; ctx.fill();
+    ctx.restore();
+
+    // Коллизия лазер → корабль
+    const dx=lr.x-ship.x, dy=lr.y-ship.y;
+    if(Math.sqrt(dx*dx+dy*dy)<14){running=false;cancelAnimationFrame(animId);gameOver();}
+  });
+
+  drawShip(ship.x,ship.y);
+}
+
+function drawShip(x,y){
+  ctx.save(); ctx.translate(x,y);
+  const eg=ctx.createRadialGradient(0,14,0,0,14,18);
+  eg.addColorStop(0,'rgba(0,200,255,0.5)'); eg.addColorStop(1,'rgba(0,100,255,0)');
+  ctx.beginPath(); ctx.arc(0,16,18,0,Math.PI*2); ctx.fillStyle=eg; ctx.fill();
+  const flicker=0.7+Math.sin(frame*0.4)*0.3;
+  ctx.beginPath(); ctx.moveTo(-6,10); ctx.lineTo(0,10+16*flicker); ctx.lineTo(6,10);
+  ctx.closePath(); ctx.fillStyle='rgba(0,220,255,0.65)'; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(0,-15); ctx.lineTo(12,12); ctx.lineTo(6,10);
+  ctx.lineTo(0,13); ctx.lineTo(-6,10); ctx.lineTo(-12,12); ctx.closePath();
+  ctx.fillStyle='#1a3a4a'; ctx.fill();
+  ctx.strokeStyle='#7bffc8'; ctx.lineWidth=1.5;
+  ctx.shadowColor='#7bffc8'; ctx.shadowBlur=8; ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(0,-4,3.5,5.5,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,245,255,0.5)'; ctx.fill();
+  ctx.restore();
+}
+
+document.addEventListener('keydown',e=>{keys[e.key]=true;});
+document.addEventListener('keyup',  e=>{keys[e.key]=false;});
+let touchStartX=null;
+canvas.addEventListener('touchstart',e=>{touchStartX=e.touches[0].clientX;});
+canvas.addEventListener('touchmove',e=>{
+  if(!touchStartX)return;
+  const dx=e.touches[0].clientX-touchStartX;
+  ship.x=Math.max(ship.w/2,Math.min(W-ship.w/2,ship.x+dx*0.65));
+  touchStartX=e.touches[0].clientX; e.preventDefault();
+},{passive:false});
+
+initGame();
+(function idleLoop(){
+  if(running)return;
+  requestAnimationFrame(idleLoop);
+  ctx.fillStyle='#03050f'; ctx.fillRect(0,0,W,H);
+  stars.forEach(s=>{
+    s.y+=s.speed; if(s.y>H){s.y=0;s.x=Math.random()*W;}
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+    ctx.fillStyle=`rgba(255,255,255,${s.a})`; ctx.fill();
+  });
+  drawShip(W/2,H-58);
+})();
+</script>
+</body>
+</html>
